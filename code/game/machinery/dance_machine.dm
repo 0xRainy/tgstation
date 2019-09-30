@@ -11,6 +11,8 @@
 	var/stop = 0
 	var/list/songs = list()
 	var/datum/track/selection = null
+	var/web_page_url = ""
+	var/list/music_jukebox_extra_data = list()
 
 /obj/machinery/jukebox/disco
 	name = "radiant dance machine mark IV"
@@ -102,8 +104,10 @@
 	dat += "<b><A href='?src=[REF(src)];action=toggle'>[!active ? "BREAK IT DOWN" : "SHUT IT DOWN"]<b></A><br>"
 	dat += "</div><br>"
 	dat += "<A href='?src=[REF(src)];action=select'> Select Track</A><br>"
+	dat += "<A href='?src=[REF(src)];action=internet'> Play Internet Song (if approved by admin)</A><br>"
 	dat += "Track Selected: [selection.song_name]<br>"
-	dat += "Track Length: [DisplayTimeText(selection.song_length)]<br><br>"
+	dat += "Track Length: [DisplayTimeText(selection.song_length)]<br>"
+	dat += "Internet Track: [web_page_url]<br><br>"
 	var/datum/browser/popup = new(user, "vending", "[name]", 400, 350)
 	popup.set_content(dat.Join())
 	popup.open()
@@ -141,6 +145,76 @@
 				return
 			selection = available[selected]
 			updateUsrDialog()
+		if("internet")
+			if(active)
+				to_chat(usr, "<span class='warning'>Error: You cannot change the song until the current one is over.</span>")
+				return
+			var/ytdl = CONFIG_GET(string/invoke_youtubedl)
+			if(!ytdl)
+				to_chat(src, "<span class='boldwarning'>Youtube-dl was not configured, action unavailable</span>") //Check config.txt for the INVOKE_YOUTUBEDL value
+				return
+			var/web_sound_jukebox_input = input("Enter content URL (supported sites only, leave blank to stop playing)", "Play Internet Sound via youtube-dl") as text|null
+			if(istext(web_sound_jukebox_input))
+				var/web_sound_jukebox_url = ""
+				var/stop_web_sounds = FALSE
+				var/list/music_jukebox_extra_data = list()
+				if(length(web_sound_jukebox_input))
+
+					web_sound_jukebox_input = trim(web_sound_jukebox_input)
+					if(findtext(web_sound_jukebox_input, ":") && !findtext(web_sound_jukebox_input, GLOB.is_http_protocol))
+						to_chat(src, "<span class='boldwarning'>Non-http(s) URIs are not allowed.</span>")
+						to_chat(src, "<span class='warning'>For youtube-dl shortcuts like ytsearch: please use the appropriate full url from the website.</span>")
+						return
+					var/shell_scrubbed_input = shell_url_scrub(web_sound_jukebox_input)
+					var/list/output = world.shelleo("[ytdl] --geo-bypass --format \"bestaudio\[ext=mp3]/best\[ext=mp4]\[height<=360]/bestaudio\[ext=m4a]/bestaudio\[ext=aac]\" --dump-single-json --no-playlist -- \"[shell_scrubbed_input]\"")
+					var/errorlevel = output[SHELLEO_ERRORLEVEL]
+					var/stdout = output[SHELLEO_STDOUT]
+					var/stderr = output[SHELLEO_STDERR]
+					if(!errorlevel)
+						var/list/data
+						try
+							data = json_decode(stdout)
+						catch(var/exception/e)
+							to_chat(src, "<span class='boldwarning'>Youtube-dl JSON parsing FAILED:</span>")
+							to_chat(src, "<span class='warning'>[e]: [stdout]</span>")
+							return
+
+						if (data["url"])
+							web_sound_jukebox_url = data["url"]
+							var/title = "[data["title"]]"
+							var/webpage_url = title
+							if (data["webpage_url"])
+								webpage_url = "<a href=\"[data["webpage_url"]]\">[title]</a>"
+							music_jukebox_extra_data["start"] = data["start_time"]
+							music_jukebox_extra_data["end"] = data["end_time"]
+
+							//SSblackbox.record_feedback("nested tally", "played_url", 1, list("[ckey]", "[web_sound_jukebox_input]"))
+							log_admin("[key_name(src)]:[key_name(usr)] played web sound: [web_page_url] [web_sound_jukebox_input]")
+							message_admins("[key_name(src)]:[key_name(usr)] played web sound: [web_page_url] [web_sound_jukebox_input]")
+					else
+						to_chat(src, "<span class='boldwarning'>Youtube-dl URL retrieval FAILED:</span>")
+						to_chat(src, "<span class='warning'>[stderr]</span>")
+
+					if(web_sound_jukebox_url && !findtext(web_sound_jukebox_url, GLOB.is_http_protocol))
+						to_chat(src, "<span class='boldwarning'>BLOCKED: Content URL not using http(s) protocol</span>")
+						to_chat(src, "<span class='warning'>The media provider returned a content URL that isn't using the HTTP or HTTPS protocol</span>")
+						return
+					if(stdout)
+						for(var/m in GLOB.player_list)
+							var/mob/M = m
+							var/client/C = M.client
+							if((C.prefs.toggles & SOUND_MIDI) && C.chatOutput && !C.chatOutput.broken && C.chatOutput.loaded)
+								if(!stop_web_sounds)
+									C.chatOutput.sendMusic(web_sound_jukebox_url, music_jukebox_extra_data)
+									C.chatOutput.sendMusic()
+									activate_music()
+								else
+									C.chatOutput.stopMusic()
+			updateUsrDialog()
+
+
+
+
 
 /obj/machinery/jukebox/proc/activate_music()
 	active = TRUE
