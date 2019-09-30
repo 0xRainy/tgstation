@@ -1418,6 +1418,14 @@
 	item_state = "doll"
 	var/doll_name = "Dummy"
 
+/obj/item/toy/figure/sephyroth_ragnarok
+	name = "Sephyroth Ragnarok"
+	desc = "It's your one true God."
+	icon_state = "sephyroth_ragnarok"
+	toysay = "I'M NOT BALD!!"
+	toysound = 'sound/voice/sephyroth_pledge.ogg'
+
+
 //Add changing looks when i feel suicidal about making 20 inhands for these.
 /obj/item/toy/dummy/attack_self(mob/user)
 	var/new_name = stripped_input(usr,"What would you like to name the dummy?","Input a name",doll_name,MAX_NAME_LEN)
